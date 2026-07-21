@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'notxanlos@gmail.com' ||
+        request.auth.token.email == 'hhkgghjj0@gmail.com' ||
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isValidContactMessage(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100
+          && data.email is string && data.email.size() > 0 && data.email.size() <= 100
+          && data.subject is string && data.subject.size() > 0 && data.subject.size() <= 200
+          && data.message is string && data.message.size() > 0 && data.message.size() <= 10000
+          && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+          && data.priority is string && data.priority.size() > 0 && data.priority.size() <= 50;
+    }
+
+    // Catalog & Content collections
+    match /anime/{animeId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /seasons/{seasonId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /episodes/{episodeId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /videoUrlMap/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /news/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /schedule/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /users_backup/{userId} {
+      allow read, write: if isSignedIn();
+    }
+    match /watchHistory/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /watchlist/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /reviews/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /comments/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /favorites/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /favoriteEpisodes/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /adminInvites/{id} {
+      allow read, write: if isSignedIn();
+    }
+    match /adminLogs/{id} {
+      allow read, write: if isSignedIn();
+    }
+    match /notifications/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /contact_messages/{id} {
+      allow create: if isValidContactMessage(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
