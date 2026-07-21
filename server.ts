@@ -53,7 +53,7 @@ function addAILog(action: string, status: "SUCCESS" | "ERROR" | "INFO", details:
 
 
 const isProd = process.env.NODE_ENV === "production";
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'db.json');
@@ -946,14 +946,14 @@ Ensure all second values are within the bounds of the episode duration (${dur} s
         activeProxyReq = proxyReq;
 
         proxyReq.on('error', (err) => {
-          console.error('Proxy request error:', err);
+          console.error('Proxy request error for ' + urlStr + ':', err);
           if (!res.headersSent) {
             res.status(500).send('Error proxying video stream: ' + err.message);
           }
         });
 
         // Safe timeout block to prevent hanging sockets
-        proxyReq.setTimeout(45000, () => {
+        proxyReq.setTimeout(3600000, () => {
           console.warn('[Proxy Video] Request timed out. Destroying stream to avoid leak.');
           proxyReq.destroy();
         });
