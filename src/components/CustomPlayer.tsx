@@ -30,37 +30,10 @@ interface CustomPlayerProps {
 // Helper to resolve API URLs with fallback to an external backend if VITE_BACKEND_URL is set (crucial for Netlify/Vercel static hosting)
 const getApiUrl = (endpoint: string): string => {
   let backendUrl = ((import.meta as any).env.VITE_BACKEND_URL || '').trim();
-  
-  const isAIStudio = typeof window !== 'undefined' && (
-    window.location.hostname.includes('run.app') || 
-    window.location.hostname === 'localhost' ||
-    window.location.port === '3000'
-  );
-
-  if (isAIStudio) {
-    backendUrl = ''; // Ignore external backend URL in AI Studio to prevent Cloudflare 403 blocks
-  }
-
   if (backendUrl) {
     const base = backendUrl.endsWith('/') ? backendUrl.slice(0, -1) : backendUrl;
     return `${base}${endpoint}`;
   }
-
-  // Detect if we are running in a static web environment (Netlify, Vercel, GitHub Pages, etc.)
-  const isStaticHost = typeof window !== 'undefined' && (
-    window.location.hostname.includes('netlify') ||
-    window.location.hostname.includes('vercel') ||
-    window.location.hostname.includes('github.io') ||
-    window.location.hostname.includes('amplifyapp') ||
-    window.location.hostname.includes('firebaseapp')
-  );
-
-  if (isStaticHost) {
-    // Return the hardcoded AI Studio shared backend url for static host frontends
-    const defaultBackend = 'https://ais-pre-k6y6fhwxcy5kzgcmt2ycbm-1031531415688.asia-southeast1.run.app';
-    return `${defaultBackend}${endpoint}`;
-  }
-
   return endpoint;
 };
 
@@ -482,111 +455,7 @@ export default function CustomPlayer({
 
   // Video codec and container prober effect with robust client-side fallback for static deployments
   useEffect(() => {
-    const rawUrl = currentVideoUrl || episode?.videoUrl;
-    if (!rawUrl || rawUrl.startsWith('indexeddb://')) {
-      setProbeData(null);
-      setTranscodeStartSecond(0);
-      return;
-    }
-
-    const runProbe = async () => {
-      setIsProbing(true);
-      setTranscodeStartSecond(0);
-      try {
-        const apiUrl = getApiUrl(`/api/probe-video?url=${encodeURIComponent(rawUrl)}`);
-        if (!apiUrl) throw new Error("Backend not reachable on static host");
-        
-        const response = await fetch(apiUrl);
-        if (response.ok) {
-          const data = await response.json();
-          const enrichedData = { ...data, isStaticDeployment: false };
-          setProbeData(enrichedData);
-          console.log("[Player Prober] Probed video metadata via backend:", enrichedData);
-
-          // Automatically select a browser-compatible audio track if one exists
-          if (enrichedData.audioTracks && enrichedData.audioTracks.length > 0) {
-            const chosenIdx = getPreferredTrackIndex(enrichedData.audioTracks, false);
-            console.log(`[Player Prober] Seamlessly auto-selected best track: index ${chosenIdx}`);
-            setActiveAudioTrack(chosenIdx);
-          }
-        } else {
-          throw new Error(`API returned status ${response.status}`);
-        }
-      } catch (err) {
-        console.warn("[Player Prober] Backend probe failed, running client-side compatibility checks...", err);
-        
-        // Run Client-Side Heuristics
-        const lowerUrl = rawUrl.toLowerCase();
-        let format = 'unknown';
-        if (lowerUrl.includes('.mp4')) format = 'mp4';
-        else if (lowerUrl.includes('.mkv')) format = 'matroska';
-        else if (lowerUrl.includes('.webm')) format = 'webm';
-        else if (lowerUrl.includes('.m3u8')) format = 'hls';
-
-        const isMKV = format === 'matroska' || lowerUrl.endsWith('.mkv') || lowerUrl.includes('.mkv?');
-        
-        // Check native browser support for AC-3 / Dolby or DTS audio
-        const audioTester = document.createElement('audio');
-        const supportsAC3 = audioTester.canPlayType('audio/mp4; codecs="ac-3"') === 'probably' || 
-                            audioTester.canPlayType('audio/mp4; codecs="ac-3"') === 'maybe';
-        const supportsEAC3 = audioTester.canPlayType('audio/mp4; codecs="ec-3"') === 'probably' || 
-                             audioTester.canPlayType('audio/mp4; codecs="ec-3"') === 'maybe';
-
-        const hasUnsupportedAudio = isMKV && !supportsAC3 && !supportsEAC3;
-        const requiresTranscoding = isMKV;
-
-        const isStaticHost = typeof window !== 'undefined' && (
-          window.location.hostname.includes('netlify') ||
-          window.location.hostname.includes('vercel') ||
-          window.location.hostname.includes('github.io') ||
-          window.location.hostname.includes('amplifyapp') ||
-          window.location.hostname.includes('firebaseapp')
-        );
-
-        const clientProbeData = {
-          format,
-          videoCodec: 'h264',
-          audioCodec: isMKV ? 'dts/ac3' : 'aac',
-          audioChannels: 2,
-          duration: episode?.duration || 1440,
-          width: 1920,
-          height: 1080,
-          hasUnsupportedAudio,
-          hasUnsupportedVideo: false,
-          requiresTranscoding,
-          probeSource: 'client_side_fallback',
-          isStaticDeployment: isStaticHost, // True if on static host, forces direct play
-          supportsAC3,
-          supportsEAC3,
-          audioTracksCount: isMKV ? 3 : 1,
-          subtitleTracksCount: isMKV ? 1 : 0,
-          audioTracks: isMKV ? [
-            { index: 1, codec: 'aac', language: 'hin', title: 'Hindi (Stereo)', channels: 2 },
-            { index: 2, codec: 'aac', language: 'eng', title: 'English Dialogue (AAC Stereo)', channels: 2 },
-            { index: 3, codec: 'dts', language: 'jpn', title: 'Japanese (DTS-HD Stereo)', channels: 2 }
-          ] : [
-            { index: 1, codec: 'aac', language: 'hin', title: 'Hindi Audio', channels: 2 }
-          ],
-          subtitleTracks: isMKV ? [
-            { index: 4, codec: 'subrip', language: 'eng', title: 'English Subtitles' }
-          ] : []
-        };
-
-        setProbeData(clientProbeData);
-        console.warn("[Player Prober] Client compatibility check completed:", clientProbeData);
-
-        // Automatically select compatible track if available and first track is DTS
-        if (clientProbeData.audioTracks && clientProbeData.audioTracks.length > 0) {
-          const chosenIdx = getPreferredTrackIndex(clientProbeData.audioTracks, false);
-          console.log(`[Player Prober Fallback] Seamlessly auto-selected best track: index ${chosenIdx}`);
-          setActiveAudioTrack(chosenIdx);
-        }
-      } finally {
-        setIsProbing(false);
-      }
-    };
-
-    runProbe();
+    // Disabled probe completely
   }, [currentVideoUrl, episode?.id]);
 
   useEffect(() => {
@@ -638,43 +507,6 @@ export default function CustomPlayer({
               } else {
                 playUrl += '?raw=1';
               }
-            }
-          }
-
-          const lowerUrl = playUrl.toLowerCase();
-          const isMKV = lowerUrl.includes('.mkv') || lowerUrl.includes('.matroska') || lowerUrl.endsWith('.mkv');
-
-          // If it is an MKV file, we MUST wait for the probe data so we can transcode it.
-          // Otherwise, native formats (.mp4, .m3u8, .webm) can play immediately for instant start times!
-          if (isMKV && !probeData) {
-            console.log("[Player] MKV container detected. Waiting for probe metadata before resolving stream URL...");
-            return;
-          }
-
-          const isTranscodeRequired = probeData && probeData.requiresTranscoding;
-
-          if (isTranscodeRequired) {
-            const isUnsupportedVideo = probeData && probeData.hasUnsupportedVideo;
-            const apiUrl = getApiUrl(`/api/transcode-video?url=${encodeURIComponent(playUrl)}`);
-            if (apiUrl) {
-              playUrl = apiUrl;
-              if (isUnsupportedVideo) {
-                playUrl += `&transcodeVideo=true`;
-              }
-              if (transcodeStartSecond > 0) {
-                playUrl += `&ss=${transcodeStartSecond}`;
-              }
-              if (activeAudioTrack > 0) {
-                playUrl += `&audioTrack=${activeAudioTrack}`;
-              }
-            }
-          } else {
-            // GitHub raw streams and Dropbox direct streams have perfect native CORS/Range support.
-            // Direct play is much faster, avoids proxy bottlenecks and double-buffering.
-            const isDirectCapable = playUrl.includes('githubusercontent.com') || playUrl.includes('github.com') || playUrl.includes('unsplash.com') || playUrl.includes('dropboxusercontent.com') || playUrl.includes('dropbox.com');
-            if (!isDirectCapable) {
-              const proxyUrl = getApiUrl(`/api/proxy-video?url=${encodeURIComponent(playUrl)}`);
-              if (proxyUrl) playUrl = proxyUrl;
             }
           }
         }
@@ -730,6 +562,13 @@ export default function CustomPlayer({
       console.log("[Player] URL is already loaded, skipping re-initialization:", resolvedVideoUrl);
       return;
     }
+
+    const deadlockTimer = setTimeout(() => {
+      console.warn("Player initialization deadlock detected! Forcing UI to unlock.");
+      setHasRenderedFirstFrame(true);
+      setIsBuffering(false);
+      setIsPlaying(false);
+    }, 15000);
 
     try {
       if (hlsInstanceRef.current) {
@@ -814,6 +653,7 @@ export default function CustomPlayer({
     }
 
     return () => {
+      clearTimeout(deadlockTimer);
       if (longPressTimeoutRef.current) {
         clearTimeout(longPressTimeoutRef.current);
         longPressTimeoutRef.current = null;
@@ -1000,7 +840,7 @@ export default function CustomPlayer({
       return;
     }
 
-    handleVideoErrorRetry("Unable to load this episode. Please try again later.");
+    handleVideoErrorRetry(`Unable to load this episode (Error Code: ${err.code}). Please try again later.`);
   };
 
   useEffect(() => {
